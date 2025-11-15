@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from skimage.feature import hog
 from skimage import exposure
+import camera
+from skimage.feature import hog as sk_hog
+
 
 from skimage import data, exposure
 
@@ -17,6 +20,68 @@ DEFAULT_BLOCK_STRIDE = (8, 8)  # slide block by 1 cell
 DEFAULT_CELL_SIZE = (8, 8)  # cell size
 DEFAULT_NBINS = 9  # 9 histogram bins
 
+def visualize_hog_for_frame(frame, hog_cv):
+    """
+    Take one BGR frame, compute HOG features,
+    and show: (1) feature histogram, (2) HOG visualization image.
+    """
+
+    # ---- 1) OpenCV HOG features (for ML etc.)
+    features = compute_hog(frame, hog_cv)
+    print("HOG feature length:", features.shape[0])
+
+    # ---- 2) Histogram of HOG feature vector
+    plt.figure(figsize=(7, 4))
+    feat_norm = features / (np.max(features) + 1e-6)
+    plt.plot(feat_norm, linewidth=1)
+    plt.title("HOG Feature Histogram")
+    plt.xlabel("Feature index")
+    plt.ylabel("Normalized magnitude")
+    plt.grid(True)
+    plt.tight_layout()
+
+    # ---- 3) skimage HOG visualization
+    gray = preprocess_patch(frame, hog_cv)
+
+    cells_per_block = (
+        hog_cv.blockSize[0] // hog_cv.cellSize[0],
+        hog_cv.blockSize[1] // hog_cv.cellSize[1],
+    )
+
+    fd, hog_image = sk_hog(
+        gray,
+        orientations=hog_cv.nbins,
+        pixels_per_cell=hog_cv.cellSize,
+        cells_per_block=cells_per_block,
+        block_norm="L2-Hys",
+        visualize=True,
+        feature_vector=True,
+        channel_axis=None,
+    )
+
+    hog_image_rescaled = exposure.rescale_intensity(
+        hog_image, in_range=(0, hog_image.max())
+    )
+
+    plt.figure(figsize=(8, 4))
+    plt.subplot(1, 2, 1)
+    img_rgb_resized = cv2.cvtColor(
+        cv2.resize(frame, hog_cv.winSize),
+        cv2.COLOR_BGR2RGB
+    )
+    plt.imshow(img_rgb_resized)
+    plt.title("Input patch")
+    plt.axis("off")
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(hog_image_rescaled, cmap="gray")
+    plt.title("HOG visualization")
+    plt.axis("off")
+    plt.tight_layout()
+
+    # This will block until you close the matplotlib windows,
+    # then control returns to the camera loop.
+    plt.show()
 
 def create_hog(
         win_size=None,
@@ -127,12 +192,10 @@ def sliding_windows(image, hog=None, step=16):
 
 
 if __name__ == "__main__":
-    image_path = "hand.png"
-    img_bgr = cv2.imread(image_path)
-    if img_bgr is None:
-        raise SystemExit(f"Could not read {image_path}")
+    # Start camera using your camera.py helpers
+    cap = camera.startCamera(0)   # or 0 depending on your system
 
-    # 1) custom HOG
+    # Create a HOG descriptor (custom or default)
     hog_cv = create_hog(
         win_size=(80, 160),
         block_size=(16, 16),
@@ -141,57 +204,22 @@ if __name__ == "__main__":
         nbins=9
     )
 
-    # 2) features
-    features = compute_hog(img_bgr, hog_cv)
-    print("HOG feature length:", features.shape[0])
+    while True:
+        frame = camera.readFrame(cap)
 
-    # 3) histogram figure
-    plt.figure(figsize=(7, 4))
-    feat_norm = features / (np.max(features) + 1e-6)
-    plt.plot(feat_norm, linewidth=1)
-    plt.title("HOG Feature Histogram")
-    plt.xlabel("Feature index")
-    plt.ylabel("Normalized magnitude")
-    plt.grid(True)
-    plt.tight_layout()
+        # Optional: show FPS from camera module
+        cv2.putText(frame, f"FPS: {camera._get_FPS()}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1, (0, 255, 0), 2)
 
-    # 4) HOG visualization figure
-    gray = preprocess_patch(img_bgr, hog_cv)
+        cv2.imshow("Camera feed", frame)
 
-    cells_per_block = (
-        hog_cv.blockSize[0] // hog_cv.cellSize[0],
-        hog_cv.blockSize[1] // hog_cv.cellSize[1],
-    )
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
+            break
+        elif key == ord('h'):
+            # Snapshot current frame and show HOG + histogram
+            visualize_hog_for_frame(frame, hog_cv)
 
-    fd, hog_image = hog(
-        gray,
-        orientations=hog_cv.nbins,
-        pixels_per_cell=hog_cv.cellSize,
-        cells_per_block=cells_per_block,
-        block_norm="L2-Hys",
-        visualize=True,
-        feature_vector=True,
-        channel_axis=None,
-    )
-
-    hog_image_rescaled = exposure.rescale_intensity(
-        hog_image, in_range=(0, hog_image.max())
-    )
-
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    img_rgb_resized = cv2.cvtColor(
-        cv2.resize(img_bgr, hog_cv.winSize), cv2.COLOR_BGR2RGB
-    )
-    plt.imshow(img_rgb_resized)
-    plt.title("Input patch")
-    plt.axis("off")
-
-    plt.subplot(1, 2, 2)
-    plt.imshow(hog_image_rescaled, cmap="gray")
-    plt.title("HOG visualization")
-    plt.axis("off")
-    plt.tight_layout()
-
-    # 5) show EVERYTHING once
-    plt.show()
+    cap.release()
+    cv2.destroyAllWindows()
