@@ -2,85 +2,93 @@ import cv2
 import time
 import numpy as np
 
-def apply_kmeans(frame, K=8):
-    # Convert the frame to a 2D float32 array of pixels
-    Z = frame.reshape((-1, 3))
-    Z = np.float32(Z)
+fps_last_time = time.time()
+fps_counter = 0
+current_fps = 0
 
-    # K-means criteria and run
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-    ret, labels, centers = cv2.kmeans(
-        Z, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
-    )
+# def apply_kmeans(frame, K=8):
+#     # Convert the frame to a 2D float32 array of pixels
+#     Z = frame.reshape((-1, 3))
+#     Z = np.float32(Z)
 
-    # Convert centers back to uint8 and rebuild segmented image
-    centers = np.uint8(centers)
-    segmented = centers[labels.flatten()]
-    segmented = segmented.reshape(frame.shape)
-    return segmented
+#     # K-means criteria and run
+#     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
+#     ret, labels, centers = cv2.kmeans(
+#         Z, K, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+#     )
 
-# def _get_FPS():
-    
+#     # Convert centers back to uint8 and rebuild segmented image
+#     centers = np.uint8(centers)
+#     segmented = centers[labels.flatten()]
+#     segmented = segmented.reshape(frame.shape)
+#     return segmented
 
-def main():
-    # """
-    # Start the camera frame with
-    # Args: 
-    #     cam: choice of camera in the system (defult 0)
 
-    # Return:
+def _get_FPS():
+    """
+        Return FPS counter and the returned FPS is updated every second
+    """
+    global fps_counter
+    global fps_last_time
+    global current_fps
 
-    # """
+    now = time.time()
+    # FPS Update
+    fps_counter+= 1
+    #Update FPS counter value every second
+    if now - fps_last_time >= 1.0: 
+        current_fps = fps_counter
+        fps_counter = 0
+        fps_last_time = now
+        
+    return current_fps
 
-    TARGET_FPS = 20
-    FRAME_INTERVAL = 1.0 / TARGET_FPS
-    K = 4   # Number of clusters for K-means
+
+def startCamera(cam):
+    """
+    Start the camera of the system
+
+    Arguments: 
+        cam: choice of camera in the system (defult 0)
+    Return:
+        The videofeed
+    """
 
     cap = cv2.VideoCapture(cam)
-
     if not cap.isOpened():
-        print("Error: Cannot open camera.")
-        return
+      raise RuntimeError("Error: Cannot open camera.")
+    return cap
 
-    # print(f"Running with K-means (K={K}) at ~{TARGET_FPS} FPS")
 
-    last_time = 0
-    fps_last_time = time.time()
-    fps_counter = 0
-    current_fps = 0
+def readFrame(videostream):
+    """
+        Read the camera stream and returns a single frame
+    """
+
+    ret, frame = videostream.read()
+    if not ret:
+        raise RuntimeError("The frames cannot be read")
+    return frame
+
+def main():
+    capture = startCamera(1)
 
     while True:
-        now = time.time()
+        frame = readFrame(capture)
+        
+        # Overlay FPS text
+        cv2.putText(frame, f"FPS: {_get_FPS()}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                    1, (0, 255, 0), 2)
 
-        if now - last_time >= FRAME_INTERVAL:
-            last_time = now
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            # Apply K-means color segmentation
-            segmented_frame = apply_kmeans(frame, K)
-
-            # FPS calculation
-            fps_counter += 1
-            if now - fps_last_time >= 1.0:
-                current_fps = fps_counter
-                fps_counter = 0
-                fps_last_time = now
-
-            # Overlay FPS text
-            cv2.putText(segmented_frame, f"FPS: {current_fps}",
-                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (0, 255, 0), 2)
-
-            # Show segmented image
-            cv2.imshow("K-means Camera", segmented_frame)
+        # Show camerafeed frames
+        cv2.imshow("Camera feed", frame)
 
         # Quit on q
-        if cv2.waitKey(1) & 0xFF == 'q':
+        if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-    cap.release()
+    capture.release()
     cv2.destroyAllWindows()
 
 
