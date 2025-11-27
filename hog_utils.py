@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
     # Create a HOG descriptor (custom or default)
     hog_cv = create_hog(
-        win_size=(80, 160),
+        win_size=(128, 128),
         block_size=(16, 16),
         block_stride=(8, 8),
         cell_size=(8, 8),
