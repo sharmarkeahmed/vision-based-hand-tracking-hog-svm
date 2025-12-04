@@ -6,6 +6,14 @@ from joblib import dump, load
 from hog_utils import create_hog, compute_hog  # your existing HOG utils
 
 # -----------------------------
+# INPUT MODE SELECTOR
+# -----------------------------
+# "mouse"    -> Left-click / Right-click to label
+# "keyboard" -> Use 'l' and 'r' keys to label at center crosshair
+INPUT_MODE = "mouse"  # change to "keyboard" if you want l/r keys
+
+
+# -----------------------------
 # CONFIG
 # -----------------------------
 HOG_WIN_SIZE = (64, 64)      # must match your detection HOG
@@ -73,9 +81,14 @@ def add_sample_at(x, y_img, label):
 
 def mouse_callback(event, x, y_img, flags, param):
     """
+    Mouse labeling only used when INPUT_MODE == "mouse".
+
     Left-click  -> positive sample (finger present at/near click)
     Right-click -> negative sample
     """
+    if INPUT_MODE != "mouse":
+        return
+
     if event == cv2.EVENT_LBUTTONDOWN:
         # POSITIVE
         add_sample_at(x, y_img, label=1)
@@ -122,11 +135,19 @@ def main():
 
     cap = cv2.VideoCapture(0)  # adjust index if needed
 
-    cv2.namedWindow("Collect finger data (click)")
-    cv2.setMouseCallback("Collect finger data (click)", mouse_callback)
+    window_name = "Collect finger data (click)"
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, mouse_callback)
 
-    print("[INFO] Left-click = POSITIVE (finger present)")
-    print("[INFO] Right-click = NEGATIVE (no finger / background)")
+    if INPUT_MODE == "mouse":
+        print("[INFO] MODE: MOUSE")
+        print("[INFO] Left-click = POSITIVE (finger present)")
+        print("[INFO] Right-click = NEGATIVE (no finger / background)")
+    else:
+        print("[INFO] MODE: KEYBOARD")
+        print("[INFO] 'l' = POSITIVE (finger present) at center crosshair")
+        print("[INFO] 'r' = NEGATIVE (no finger / background) at center crosshair")
+
     print("[INFO] Press 's' to save dataset, 'q' to quit.\n")
 
     while True:
@@ -141,14 +162,21 @@ def main():
 
         # Draw a crosshair so you have a sense of the center
         H, W = frame.shape[:2]
+        cx, cy = W // 2, H // 2
         cv2.line(frame, (W//2, 0), (W//2, H), (0, 255, 0), 1)
         cv2.line(frame, (0, H//2), (W, H//2), (0, 255, 0), 1)
 
-        cv2.putText(frame, "L-click: POS | R-click: NEG | s: save | q: quit",
+        # Instruction text depends on mode
+        if INPUT_MODE == "mouse":
+            instr = "L-click: POS | R-click: NEG | s: save | q: quit"
+        else:
+            instr = "'l': POS (center) | 'r': NEG (center) | s: save | q: quit"
+
+        cv2.putText(frame, instr,
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                     (0, 255, 0), 2)
 
-        cv2.imshow("Collect finger data (click)", frame)
+        cv2.imshow(window_name, frame)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
@@ -162,6 +190,12 @@ def main():
                 dump((X_arr, y_arr), OUTPUT_DATASET_PATH)
                 print(f"[SAVED] Dataset with shape X={X_arr.shape}, y={y_arr.shape} "
                       f"saved to {OUTPUT_DATASET_PATH}")
+        elif INPUT_MODE == "keyboard":
+            # Label at center crosshair using keys
+            if key == ord('l'):
+                add_sample_at(cx, cy, label=1)
+            elif key == ord('r'):
+                add_sample_at(cx, cy, label=0)
 
     cap.release()
     cv2.destroyAllWindows()
