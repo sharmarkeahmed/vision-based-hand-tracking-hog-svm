@@ -1,37 +1,46 @@
+"""
+hog_finger_data.py
+
+This file is used to obtain manual finger/hand samples for HoG. Using the user's camera,
+a user will be prompted to click on positive samples (finger) and negative samples of the background.
+The file will compute a HoG for each sample and store HoG features in X array and store corresponding
+labels (positive or negative sample) in Y array. This is then stored in data/hog_finger_click_dataset.joblib
+folder. You may need to ensure a data/ folder is created before running this folder
+
+To obtain the X, Y array in another Python file, perform the following:
+
+1.) Import joblib: 'from joblib import dump, load'
+2.) Run the following code: 'X, Y = load(data/hog_finger_click_dataset.joblib)' to obtain X, Y arrays
+
+Note that this file is meant to be used with the train_finger_svm.py file.
+"""
+
 import cv2
 import numpy as np
 import os
 import shutil
-from joblib import dump, load
+from joblib import dump, load  # joblib is used to dump and load python objects to be
+# used later by other files
+from hog_utils import create_hog, compute_hog
 
-from hog_utils import create_hog, compute_hog  # your existing HOG utils
+# Select input mode below:
+# "mouse"    -> Lft click / Right click to label positive/negative samples (better for mouse users)
+# "keyboard" -> Use 'l' and 'r' keys to label positive/negative samples (better for laptops)
+INPUT_MODE = "keyboard"
 
-# -----------------------------
-# INPUT MODE SELECTOR
-# -----------------------------
-# "mouse"    -> Left-click / Right-click to label
-# "keyboard" -> Use 'l' and 'r' keys to label at center crosshair
-INPUT_MODE = "keyboard"  # change to "mouse" if you want mouse clicks
-
-
-# -----------------------------
-# CONFIG
-# -----------------------------
-HOG_WIN_SIZE = (64, 64)      # must match your detection HOG
-BLOCK_SIZE   = (16, 16)
+# HOG configuration parameters
+HOG_WIN_SIZE = (64, 64)  # must match detection HOG
+BLOCK_SIZE = (16, 16)
 BLOCK_STRIDE = (8, 8)
-CELL_SIZE    = (8, 8)
-NBINS        = 9
+CELL_SIZE = (8, 8)
+NBINS = 9
 
 OUTPUT_DATASET_PATH = "data/hog_finger_click_dataset.joblib"
 BACKUP_DATASET_PATH = "data/hog_finger_click_dataset_old.joblib"
 
-# -----------------------------
-# GLOBALS FOR MOUSE CALLBACK
-# -----------------------------
-last_frame = None   # current frame
-X = []              # list of feature vectors
-y = []              # list of labels (1=positive, 0=negative)
+last_frame = None  # current frame
+X = []  # list of feature vectors
+Y = []  # list of labels (1=positive, 0=negative)
 
 hog = create_hog(
     win_size=HOG_WIN_SIZE,
@@ -44,41 +53,42 @@ hog = create_hog(
 
 def add_sample_at(x, y_img, label):
     """
-    Extract a patch centered at (x, y_img) from last_frame,
-    compute HOG, add to dataset with given label.
+    obtain a patch centered at (x, y_img) from last_frame,
+    compute HOG, and add it to X (feature) and Y (label) dataset
     """
-    global last_frame, X, y
+    global last_frame, X, Y
 
     if last_frame is None:
         return
 
-    H, W = last_frame.shape[:2]
+    h, w = last_frame.shape[:2]
     win_w, win_h = HOG_WIN_SIZE
 
-    # Top-left of patch
+    # top left of patch
     x1 = int(x - win_w // 2)
     y1 = int(y_img - win_h // 2)
     x2 = x1 + win_w
     y2 = y1 + win_h
 
-    # Ensure patch is within frame
-    if x1 < 0 or y1 < 0 or x2 > W or y2 > H:
+    # ensure patch is within frame
+    if x1 < 0 or y1 < 0 or x2 > w or y2 > h:
         print("[WARN] Click too close to edge, patch would go out of frame. Ignoring.")
         return
 
     patch = last_frame[y1:y2, x1:x2]
 
-    # Compute HOG (no image saved)
+    # compute HOG (no image saved)
     feat = compute_hog(patch, hog)
-    X.append(feat)
-    y.append(label)
+    X.append(feat) # X stores the computed hog feature,
+    # Y stores the label (positive/negative)
+    Y.append(label)
 
     label_str = "POSITIVE" if label == 1 else "NEGATIVE"
-    y_arr = np.array(y)
+    y_arr = np.array(Y)
     n_pos = int((y_arr == 1).sum())
     n_neg = int((y_arr == 0).sum())
     print(f"[INFO] Saved {label_str} sample at ({x}, {y_img}). "
-          f"Total: pos={n_pos}, neg={n_neg}, total={len(y)}")
+          f"Total: pos={n_pos}, neg={n_neg}, total={len(Y)}")
 
 
 def mouse_callback(event, x, y_img, flags, param):
@@ -105,7 +115,7 @@ def maybe_load_existing_dataset():
     If OUTPUT_DATASET_PATH exists, ask user whether to load + append.
     If yes, load existing X, y and convert to lists so we can extend them.
     """
-    global X, y
+    global X, Y
 
     if not os.path.exists(OUTPUT_DATASET_PATH):
         print("[INFO] No existing dataset found. Starting fresh.")
@@ -115,12 +125,12 @@ def maybe_load_existing_dataset():
                 "Load and append new samples? (y/n): ").strip().lower()
 
     if ans == "y":
-        X_arr, y_arr = load(OUTPUT_DATASET_PATH)
-        print(f"[INFO] Loaded existing dataset: X={X_arr.shape}, y={y_arr.shape}")
+        x_arr, y_arr = load(OUTPUT_DATASET_PATH)
+        print(f"[INFO] Loaded existing dataset: X={x_arr.shape}, y={y_arr.shape}")
         # Convert to lists to keep appending
-        X = [row for row in X_arr]
-        y = list(y_arr)
-        print(f"[INFO] Continuing from existing dataset. Current total samples: {len(y)}")
+        X = [row for row in x_arr]
+        Y = list(y_arr)
+        print(f"[INFO] Continuing from existing dataset. Current total samples: {len(Y)}")
     else:
         print("[INFO] Starting fresh dataset (existing file will be overwritten on save).")
 
@@ -139,9 +149,9 @@ def backup_existing_dataset():
 
 
 def main():
-    global last_frame, X, y
+    global last_frame, X, Y
 
-    # Optional: create data folder if not present
+    # optional: create data folder if not present
     data_dir = os.path.dirname(OUTPUT_DATASET_PATH) or "."
     os.makedirs(data_dir, exist_ok=True)
 
@@ -170,18 +180,18 @@ def main():
         if not ret:
             break
 
-        # Optional: flip horizontally
+        # flip horizontally
         frame = cv2.flip(frame, 1)
 
         last_frame = frame.copy()
 
-        # Draw a crosshair so you have a sense of the center
-        H, W = frame.shape[:2]
-        cx, cy = W // 2, H // 2
-        cv2.line(frame, (W//2, 0), (W//2, H), (0, 255, 0), 1)
-        cv2.line(frame, (0, H//2), (W, H//2), (0, 255, 0), 1)
+        # draw a crosshair so we have a sense of the center
+        h, w = frame.shape[:2]
+        cx, cy = w // 2, h // 2
+        cv2.line(frame, (w // 2, 0), (w // 2, h), (0, 255, 0), 1)
+        cv2.line(frame, (0, h // 2), (w, h // 2), (0, 255, 0), 1)
 
-        # Instruction text depends on mode
+        # instruction text depends on mode
         if INPUT_MODE == "mouse":
             instr = "L-click: POS | R-click: NEG | s: save | q: quit"
         else:
@@ -200,16 +210,16 @@ def main():
             if len(X) == 0:
                 print("[WARN] No samples collected; skipping save.")
             else:
-                # Always backup existing dataset (if any) before overwriting
+                # always backup existing dataset (if any) before overwriting
                 backup_existing_dataset()
 
-                X_arr = np.vstack(X)   # shape (N, D)
-                y_arr = np.array(y)
-                dump((X_arr, y_arr), OUTPUT_DATASET_PATH)
-                print(f"[SAVED] Dataset with shape X={X_arr.shape}, y={y_arr.shape} "
+                x_arr = np.vstack(X)  # shape (N, D)
+                y_arr = np.array(Y)
+                dump((x_arr, y_arr), OUTPUT_DATASET_PATH)
+                print(f"[SAVED] Dataset with shape X={x_arr.shape}, y={y_arr.shape} "
                       f"saved to {OUTPUT_DATASET_PATH}")
         elif INPUT_MODE == "keyboard":
-            # Label at center crosshair using keys
+            # label at center crosshair using keys
             if key == ord('l'):
                 add_sample_at(cx, cy, label=1)
             elif key == ord('r'):
