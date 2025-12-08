@@ -1,6 +1,11 @@
-# game.py
+"""
+game.py
+
+Contains a PongGame class for running the ping pong game
+"""
 
 import cv2
+import numpy as np  # for simple randomness in AI behavior
 
 from config import (
     PADDLE_WIDTH, PADDLE_HEIGHT, PADDLE_X_OFFSET,
@@ -15,7 +20,12 @@ class PongGame:
     - Player (right) and AI (left) paddles
     - Ball position and velocity
     - Scoring (player vs AI)
-    - Collisions and simple AI behavior
+    - Collisions and AI behavior
+
+    The AI is intentionally "human-like":
+    - Limited vertical speed (cannot instantly follow the ball)
+    - Reacts more strongly only when the ball is close and moving toward it
+    - Has deliberate mistakes / hesitation so it is beatable
     """
 
     def __init__(self):
@@ -31,6 +41,15 @@ class PongGame:
 
         self.player_score = 0
         self.ai_score = 0
+
+        # AI behavior parameters (tune these to make AI easier/harder)
+        self.ai_max_speed = 300.0      # px/sec vertical max speed (slower = easier)
+        self.ai_react_x_frac = 0.5     # AI only fully reacts when ball_x < W * this
+        self.ai_error = 0.0            # vertical offset error (pixels)
+        self.ai_error_alpha = 0.95     # smoothing factor for AI error (EMA)
+
+        # "Dumbness": chance that when ball is threatening, AI reacts poorly
+        self.ai_dumb_chance = 0.35     # 0.0 = perfect robot, 1.0 = clown
 
     def _init_if_needed(self, H, W):
         if self.initialized:
@@ -58,20 +77,26 @@ class PongGame:
         self._init_if_needed(H, W)
         half_h = PADDLE_HEIGHT // 2
 
+        # -------------------------
         # Player paddle follows fingertip (if present)
+        # -------------------------
         if fingertip_y is not None:
             if self.player_paddle_cy is None:
                 self.player_paddle_cy = fingertip_y
             else:
-                self.player_paddle_cy = PADDLE_ALPHA * fingertip_y + \
-                                        (1 - PADDLE_ALPHA) * self.player_paddle_cy
+                self.player_paddle_cy = (
+                    PADDLE_ALPHA * fingertip_y
+                    + (1 - PADDLE_ALPHA) * self.player_paddle_cy
+                )
 
         if self.player_paddle_cy is None:
             self.player_paddle_cy = H // 2
 
         self.player_paddle_cy = max(half_h, min(H - half_h, self.player_paddle_cy))
 
+        # -------------------------
         # Move ball
+        # -------------------------
         if dt > 0:
             self.ball_x += self.ball_vx * dt
             self.ball_y += self.ball_vy * dt
@@ -84,7 +109,58 @@ class PongGame:
             self.ball_y = H - BALL_RADIUS
             self.ball_vy *= -1
 
+        # -------------------------
+        # AI target logic (nerfed / human-like)
+        # -------------------------
+        # Base target is the ball y
+        ai_target_cy = self.ball_y
+
+        # Small random vertical bias so AI doesn't line up perfectly
+        jitter = np.random.uniform(-5.0, 5.0)
+        self.ai_error = (
+            self.ai_error_alpha * self.ai_error
+            + (1.0 - self.ai_error_alpha) * jitter * 3.0
+        )
+
+        ball_moving_toward_ai = (self.ball_vx < 0)
+
+        if ball_moving_toward_ai:
+            # Ball moving left (toward AI)
+            if self.ball_x < W * self.ai_react_x_frac:
+                # Ball is close enough to be dangerous → AI tries harder,
+                # but sometimes "derps" and reacts badly.
+                if np.random.rand() < self.ai_dumb_chance:
+                    # Bad reaction: aim slightly *away* from the true position
+                    ai_target_cy = self.ball_y + self.ai_error + np.random.uniform(-80, 80)
+                else:
+                    # Normal reaction with some error
+                    ai_target_cy = self.ball_y + self.ai_error
+            else:
+                # Ball still far: be lazy, drift partway between center and ball
+                ai_target_cy = 0.5 * (self.ball_y + H / 2) + 0.5 * self.ai_error
+        else:
+            # Ball moving away from AI: relax strongly toward center
+            ai_target_cy = H / 2 + 0.7 * self.ai_error
+
+        # -------------------------
+        # AI paddle movement with speed limit
+        # -------------------------
+        if self.ai_paddle_cy is None:
+            self.ai_paddle_cy = H // 2
+
+        dy = ai_target_cy - self.ai_paddle_cy
+
+        if dt > 0:
+            max_step = self.ai_max_speed * dt
+            if abs(dy) > max_step:
+                dy = np.sign(dy) * max_step
+
+        self.ai_paddle_cy += dy
+        self.ai_paddle_cy = max(half_h, min(H - half_h, self.ai_paddle_cy))
+
+        # -------------------------
         # Paddle rectangles
+        # -------------------------
         lp_x1 = PADDLE_X_OFFSET
         lp_x2 = lp_x1 + PADDLE_WIDTH
         lp_y1 = int(self.ai_paddle_cy - half_h)
@@ -95,15 +171,10 @@ class PongGame:
         rp_y1 = int(self.player_paddle_cy - half_h)
         rp_y2 = int(self.player_paddle_cy + half_h)
 
-        # AI paddle follows ball y
-        ai_target_cy = self.ball_y
-        self.ai_paddle_cy = (1 - AI_PADDLE_ALPHA) * self.ai_paddle_cy + \
-                            AI_PADDLE_ALPHA * ai_target_cy
-        self.ai_paddle_cy = max(half_h, min(H - half_h, self.ai_paddle_cy))
-        lp_y1 = int(self.ai_paddle_cy - half_h)
-        lp_y2 = int(self.ai_paddle_cy + half_h)
-
-        # Collisions: right (player) paddle
+        # -------------------------
+        # Ball-paddle collisions
+        # -------------------------
+        # Collision with right (player) paddle
         if (self.ball_x + BALL_RADIUS >= rp_x1 and
             self.ball_x - BALL_RADIUS <= rp_x2 and
             rp_y1 <= self.ball_y <= rp_y2 and
@@ -111,7 +182,7 @@ class PongGame:
             self.ball_x = rp_x1 - BALL_RADIUS
             self.ball_vx *= -1
 
-        # Collisions: left (AI) paddle
+        # Collision with left (AI) paddle
         if (self.ball_x - BALL_RADIUS <= lp_x2 and
             self.ball_x + BALL_RADIUS >= lp_x1 and
             lp_y1 <= self.ball_y <= lp_y2 and
@@ -119,7 +190,9 @@ class PongGame:
             self.ball_x = lp_x2 + BALL_RADIUS
             self.ball_vx *= -1
 
+        # -------------------------
         # Off-screen (scoring)
+        # -------------------------
         if self.ball_x < -BALL_RADIUS:
             # Ball exited left side → YOU score
             self.player_score += 1
