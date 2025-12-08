@@ -1,4 +1,9 @@
-# detector.py
+"""
+detector.py
+
+Set of functions for detecting the finger. Uses HOG feature extraction from OpenCV & SVM model
+produced from train_finger_svm.py
+"""
 
 import cv2
 import numpy as np

@@ -1,4 +1,8 @@
-# main.py
+"""
+main.py
+
+Run this file to play the ping pong game
+"""
 
 import time
 import cv2
@@ -105,7 +109,7 @@ def main():
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q'):
             break
-        # If you ever want a runtime toggle:
+        # for runtime toggle:
         # elif key == ord('d'):
         #     DEBUG_MODE = not DEBUG_MODE
 
